@@ -1,0 +1,11 @@
+*.env
+*.lock
+auth.lock
+auth.json
+cache/
+sessions/
+models_dev_cache.json
+webui_state/
+browser_screenshots/
+memories/
+.usage.json
