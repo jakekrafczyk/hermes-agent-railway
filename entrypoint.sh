@@ -213,6 +213,28 @@ if idx_p.exists():
 PY
 fi
 
+# Sync bundled profiles into /data/ on every boot.
+# Profile authors update config.yaml, AGENTS.md, and SOUL.md in the repo;
+# the entrypoint copies them to the persistent volume. Only non-secret files
+# are synced — .env and credentials stay in Railway environment variables.
+# The "default" profile syncs to HERMES_HOME itself (e.g. /data/config.yaml);
+# named profiles sync to HERMES_HOME/profiles/<name>/.
+if [ -d "/opt/hermes-railway/profiles" ]; then
+  for profile_dir in /opt/hermes-railway/profiles/*/; do
+    [ -d "${profile_dir}" ] || continue
+    profile_name="$(basename "${profile_dir}")"
+    [ "${profile_name}" = ".gitignore" ] && continue
+    if [ "${profile_name}" = "default" ]; then
+      cp -R "${profile_dir}"/* "${HERMES_HOME}/"
+      echo "Synced profile: default (→ HERMES_HOME)"
+    else
+      mkdir -p "${HERMES_HOME}/profiles/${profile_name}"
+      cp -R "${profile_dir}"/* "${HERMES_HOME}/profiles/${profile_name}/"
+      echo "Synced profile: ${profile_name}"
+    fi
+  done
+fi
+
 if [ -d "/opt/hermes-railway/skills" ]; then
   for skill_dir in /opt/hermes-railway/skills/*/; do
     [ -d "${skill_dir}" ] || continue
