@@ -1,0 +1,12 @@
+{
+  "auto_capture": true,
+  "auto_recall": false,
+  "container_tag": "voltaic",
+  "custom_container_instructions": "Use voltaic_code_architect for architecture decisions, code reviews, system design, dependency audits, and cross-profile infrastructure facts. Default voltaic for everything else.",
+  "custom_containers": [
+    "voltaic_code_architect"
+  ],
+  "enable_custom_container_tags": true,
+  "max_recall_results": 3,
+  "search_mode": "hybrid"
+}
