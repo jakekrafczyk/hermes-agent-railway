@@ -1,0 +1,43 @@
+# Profile Manifest
+# The orchestrator reads this at session start to discover available workers.
+#
+# Format:
+#   profile_id:
+#     name: Display Name
+#     path: /data/profiles/<name>/
+#     domain: primary domain
+#     task_types: [list of task_type values for routing]
+#     routing_priority: lower number = higher priority
+#     status: active|inactive
+
+default:
+  name: Orchestrator
+  path: /data/
+  domain: orchestration
+  task_types: []
+  routing_priority: 0
+  status: active
+
+researcher:
+  name: Researcher
+  path: /data/profiles/researcher/
+  domain: research
+  task_types: [research, scrape, competitive_analysis, social_media, authenticated]
+  routing_priority: 10
+  status: active
+
+code_architect:
+  name: Code Architect
+  path: /data/profiles/code_architect/
+  domain: architecture
+  task_types: [code_review, architecture, bug_hunt, dependency_audit, documentation, infrastructure]
+  routing_priority: 10
+  status: active
+
+social_media:
+  name: Social Media
+  path: /data/profiles/social_media/
+  domain: social
+  task_types: [social_media]
+  routing_priority: 20
+  status: active

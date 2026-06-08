@@ -1,0 +1,19 @@
+# Client Registry
+# Add clients here. The orchestrator reads this at session start.
+# 
+# Format:
+#   client_id:
+#     name: Display Name
+#     domain: category (optional)
+#     active: true|false
+# 
+# Example:
+#   mobilemd:
+#     name: MobileMD
+#     domain: healthcare
+#     active: true
+
+voltaic:
+  name: Voltaic Marketing
+  domain: marketing
+  active: true
