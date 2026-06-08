@@ -22,6 +22,9 @@ mkdir -p \
   "${HERMES_HOME}/home" \
   "${HERMES_HOME}/home/workspace" \
   "${HERMES_HOME}/workspace" \
+  "${HERMES_HOME}/workspace/triage/inbox" \
+  "${HERMES_HOME}/workspace/triage/task_requests/consumed" \
+  "${HERMES_HOME}/workspace/triage/resolved" \
   "${HERMES_HOME}/hooks" \
   "${HERMES_HOME}/logs" \
   "${HERMES_HOME}/memories" \
@@ -29,6 +32,27 @@ mkdir -p \
   "${HERMES_HOME}/sessions" \
   "${HERMES_HOME}/skills" \
   "${HERMES_HOME}/skins"
+
+# Seed workspace files on first boot. Never overwrite existing files —
+# the operator's live data (clients.yaml, profiles.yaml) takes priority.
+SEEDS_DIR="/opt/hermes-railway/profiles/default/seeds"
+if [ -d "${SEEDS_DIR}" ]; then
+  # clients.yaml
+  if [ ! -f "${HERMES_HOME}/workspace/clients.yaml" ] && [ -f "${SEEDS_DIR}/clients.yaml" ]; then
+    cp "${SEEDS_DIR}/clients.yaml" "${HERMES_HOME}/workspace/clients.yaml"
+    echo "Seeded: workspace/clients.yaml"
+  fi
+  # profiles.yaml
+  if [ ! -f "${HERMES_HOME}/workspace/profiles.yaml" ] && [ -f "${SEEDS_DIR}/profiles.yaml" ]; then
+    cp "${SEEDS_DIR}/profiles.yaml" "${HERMES_HOME}/workspace/profiles.yaml"
+    echo "Seeded: workspace/profiles.yaml"
+  fi
+  # .task-format.md
+  if [ ! -f "${HERMES_HOME}/workspace/triage/.task-format.md" ] && [ -f "${SEEDS_DIR}/triage/.task-format.md" ]; then
+    cp "${SEEDS_DIR}/triage/.task-format.md" "${HERMES_HOME}/workspace/triage/.task-format.md"
+    echo "Seeded: workspace/triage/.task-format.md"
+  fi
+fi
 
 if [ "$(id -u)" = "0" ]; then
   # Update /etc/passwd so anything that reads home from passwd (gosu, getent,
