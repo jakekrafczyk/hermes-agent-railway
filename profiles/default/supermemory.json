@@ -1,0 +1,14 @@
+{
+  "auto_capture": true,
+  "auto_recall": false,
+  "container_tag": "voltaic",
+  "custom_container_instructions": "Client-only containers (no domain suffixes). voltaic=default (auto-capture target + operational context). Other containers (mobilemd, west_shore_chamber, etc.) store client business context only — brand voice, audience data, campaign history, business objectives, market context. Store tool writes to active client container only (skip when active client is voltaic — auto-capture handles it). Recall runs two searches per task: (1) voltaic for operational/technical, (2) active client container for business context. Skip search #2 when client=voltaic.",
+  "custom_containers": [
+    "voltaic",
+    "mobilemd",
+    "west_shore_chamber"
+  ],
+  "enable_custom_container_tags": true,
+  "max_recall_results": 3,
+  "search_mode": "hybrid"
+}

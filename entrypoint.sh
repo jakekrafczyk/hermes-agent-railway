@@ -245,6 +245,26 @@ if [ -d "/opt/hermes-railway/skills" ]; then
   done
 fi
 
+# Sync plugins — memory providers, tools, integrations.
+# Plugins live at the Hermes root level (/data/plugins/) and are
+# shared across all profiles. Partner-specific plugins go in
+# /data/local/plugins/ — never overwritten.
+if [ -d "/opt/hermes-railway/plugins" ]; then
+  for plugin_dir in /opt/hermes-railway/plugins/*/; do
+    [ -d "${plugin_dir}" ] || continue
+    plugin_name="$(basename "${plugin_dir}")"
+    mkdir -p "${HERMES_HOME}/plugins/${plugin_name}"
+    cp -R "${plugin_dir}"/* "${HERMES_HOME}/plugins/${plugin_name}/"
+    echo "Synced plugin: ${plugin_name}"
+  done
+fi
+
+# Apply partner's /data/local/ overrides on top of distribution files.
+# /data/local/ is NEVER in the git repo — partner-owned, survives redeploys.
+if [ -f "${HERMES_HOME}/scripts/merge-local.sh" ]; then
+  bash "${HERMES_HOME}/scripts/merge-local.sh"
+fi
+
 if [ -z "${ADMIN_PASSWORD:-}" ]; then
   if [ -f "${ADMIN_PASSWORD_FILE}" ]; then
     ADMIN_PASSWORD="$(tr -d '\n' < "${ADMIN_PASSWORD_FILE}")"
