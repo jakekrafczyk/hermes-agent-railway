@@ -1,0 +1,7 @@
+{
+  "auto_capture": true,
+  "auto_recall": false,
+  "container_tag": "voltaic",
+  "max_recall_results": 3,
+  "search_mode": "hybrid"
+}
