@@ -1,8 +1,49 @@
+# Hermes Agent Railway — Shared Profile Distribution
+# Excludes: secrets (.env, auth.json), user data (memories/, sessions/, state.db*),
+#           runtime (logs/, workspace/, cache/, local/)
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.venv/
+*.lock
+
+# Node
+node_modules/
+*.lock
+
+# Secrets
 .env
 .env.local
+auth.json
+auth.lock
+admin.password
+
+# User data (never shared)
+memories/
+sessions/
+state.db*
+models_dev_cache.json
+
+# Runtime
+logs/
+workspace/
 *.log
+webui_state/
+browser_screenshots/
+
+# Local overrides (partner's personalizations)
+local/
+*.local
+
+# Cache
+*_cache/
+.cache/
+.usage.json
+
+# System
 .DS_Store
+.venv/
+sandboxes/
+image_cache/
+audio_cache/

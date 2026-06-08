@@ -74,12 +74,14 @@ WORKDIR /opt/hermes-railway
 COPY admin ./admin
 COPY skills ./skills
 COPY profiles ./profiles
+COPY plugins ./plugins
 COPY entrypoint.sh ./entrypoint.sh
 
 # Owned by `hermes` so `git fetch`/`hermes update` from the Web TUI do not trip
 # "detected dubious ownership" (repos owned by root, commands run as hermes).
 RUN chmod +x /opt/hermes-railway/entrypoint.sh && \
   mkdir -p /data && \
+  chmod +x /opt/hermes-railway/profiles/default/scripts/merge-local.sh 2>/dev/null || true && \
   chown -R hermes:hermes \
     /opt/hermes \
     /opt/hermes-webui \
