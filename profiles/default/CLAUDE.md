@@ -4,6 +4,13 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## 0. Workflow Protocol (Loaded Every Session)
+
+If `/data/workflow/orchestration.md` exists, read and internalize it at session start. This
+file contains multi-profile orchestration patterns (delegation, triage, routing, inbox
+processing, error resolution) that are identity-agnostic and apply regardless of the agent's
+personality. These patterns are distribution-owned and receive updates via the shared repo.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
