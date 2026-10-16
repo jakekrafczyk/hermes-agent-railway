@@ -4,6 +4,7 @@ ARG HERMES_REF=71d34bad1045610252eda02ee79549436896e784
 ARG HERMES_WEBUI_REF=v0.50.278
 
 ENV PYTHONUNBUFFERED=1 \
+  PYTHONNOUSERSITE=1 \
   PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright \
   HERMES_HOME=/data \
   PATH="/opt/hermes/.venv/bin:/data/.local/bin:${PATH}" \
