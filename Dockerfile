@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie
 
-ARG HERMES_REF=main
+ARG HERMES_REF=71d34bad1045610252eda02ee79549436896e784
 ARG HERMES_WEBUI_REF=v0.50.278
 
 ENV PYTHONUNBUFFERED=1 \
@@ -20,8 +20,6 @@ RUN apt-get update && \
     git \
     gosu \
     libffi-dev \
-    nodejs \
-    npm \
     openssh-client \
     procps \
     python3 \
@@ -29,6 +27,13 @@ RUN apt-get update && \
     ripgrep \
     tini && \
   rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh && \
+    bash /tmp/nodesource_setup.sh && \
+    rm -f /tmp/nodesource_setup.sh && \
+    apt-get install -y --no-install-recommends nodejs && \
+    node -v && npm -v && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --uid 10000 --create-home --home-dir /home/hermes --shell /bin/bash hermes
 
