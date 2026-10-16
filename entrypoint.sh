@@ -6,6 +6,10 @@ export PORT="${PORT:-8080}"
 export PATH="/opt/hermes/.venv/bin:/data/.local/bin:${PATH}"
 export PYTHONPATH="/opt/hermes-railway:/opt/hermes-webui:/opt/hermes:${PYTHONPATH:-}"
 
+# Always run Python from the image's venv. Bare python3 can resolve to the base
+# image's /usr/local/bin/python3, which doesn't have uvicorn and friends.
+HERMES_PY="/opt/hermes/.venv/bin/python"
+
 # Point the hermes user's $HOME at the persistent /data volume. Railway only
 # allows one volume per service, so anything that lands outside /data is wiped
 # on redeploy. Without this, the agent's chat workspace defaults to
@@ -74,7 +78,7 @@ fi
 # in auth.json paired with model.provider in config.yaml (Codex/Nous flows).
 WEBUI_SETTINGS="${HERMES_HOME}/.hermes/webui/settings.json"
 if [ -f "${WEBUI_SETTINGS}" ] && [ ! -f "${HERMES_HOME}/.env" ]; then
-  python3 - <<PY || true
+  "${HERMES_PY}" - <<PY || true
 import json, pathlib
 import yaml
 
@@ -131,7 +135,7 @@ rm -f "${HERMES_HOME}/.hermes/webui/models_cache.json" 2>/dev/null || true
 # This normalizes the state at boot so users don't hit
 # "No LLM provider configured" after running either flow.
 if [ -f "${HERMES_HOME}/auth.json" ]; then
-  python3 - <<PY || true
+  "${HERMES_PY}" - <<PY || true
 import json, sys, pathlib
 import yaml
 auth_p = pathlib.Path("${HERMES_HOME}/auth.json")
@@ -188,7 +192,7 @@ fi
 # the active provider.
 SESSIONS_DIR="${HERMES_HOME}/.hermes/webui/sessions"
 if [ -d "${SESSIONS_DIR}" ] && [ -f "${HERMES_HOME}/config.yaml" ]; then
-  python3 - <<PY || true
+  "${HERMES_PY}" - <<PY || true
 import json, glob, os, pathlib
 import yaml
 cfg = yaml.safe_load(pathlib.Path("${HERMES_HOME}/config.yaml").read_text()) or {}
@@ -356,9 +360,9 @@ start_webui_watchdog() {
   while true; do
     printf '\n--- Starting Hermes WebUI on %s:%s %s ---\n' "${HERMES_WEBUI_HOST}" "${HERMES_WEBUI_PORT}" "$(date)" >> "${WEBUI_LOG}"
     if [ -n "${AS_USER}" ]; then
-      gosu "${AS_USER}" python3 /opt/hermes-webui/server.py >> "${WEBUI_LOG}" 2>&1 < /dev/null &
+      gosu "${AS_USER}" "${HERMES_PY}" /opt/hermes-webui/server.py >> "${WEBUI_LOG}" 2>&1 < /dev/null &
     else
-      python3 /opt/hermes-webui/server.py >> "${WEBUI_LOG}" 2>&1 < /dev/null &
+      "${HERMES_PY}" /opt/hermes-webui/server.py >> "${WEBUI_LOG}" 2>&1 < /dev/null &
     fi
     local PID=$!
     echo "${PID}" > "${WEBUI_PID_FILE}"
@@ -377,8 +381,8 @@ start_webui_watchdog() {
 if [ "$(id -u)" = "0" ]; then
   chown -R hermes:hermes "${HERMES_HOME}" /opt/hermes-railway 2>/dev/null || true
   start_webui_watchdog hermes &
-  exec gosu hermes python3 -m uvicorn admin.app:app --host 0.0.0.0 --port "${PORT}"
+  exec gosu hermes "${HERMES_PY}" -m uvicorn admin.app:app --host 0.0.0.0 --port "${PORT}"
 fi
 
 start_webui_watchdog "" &
-exec python3 -m uvicorn admin.app:app --host 0.0.0.0 --port "${PORT}"
+exec "${HERMES_PY}" -m uvicorn admin.app:app --host 0.0.0.0 --port "${PORT}"
