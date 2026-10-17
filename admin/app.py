@@ -29,7 +29,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from . import proxy as hermes_proxy
@@ -68,8 +68,13 @@ async def tui_page(request: Request):
     return HTMLResponse(TEMPLATE_PATH.read_text(encoding="utf-8"))
 
 
+async def health(request: Request):
+    return JSONResponse({"status": "ok"})
+
+
 routes = [
     Route("/tui", tui_page, methods=["GET"]),
+    Route("/health", health, methods=["GET"]),
     WebSocketRoute("/tui/ws/auth/{provider}", hermes_terminal.login_ws),
     WebSocketRoute("/tui/ws/shell", hermes_terminal.shell_ws),
     Mount(DASHBOARD_MOUNT_PREFIX, build_dashboard_starlette_app()),
