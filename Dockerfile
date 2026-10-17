@@ -5,6 +5,7 @@ ARG HERMES_WEBUI_REF=v0.50.278
 
 ENV PYTHONUNBUFFERED=1 \
   PYTHONNOUSERSITE=1 \
+  UV_PYTHON_INSTALL_DIR=/opt/uv-python \
   PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright \
   HERMES_HOME=/data \
   PATH="/opt/hermes/.venv/bin:/data/.local/bin:${PATH}" \
@@ -55,6 +56,7 @@ RUN uv venv && \
   uv pip install --no-cache-dir -e ".[all,messaging]"
 
 RUN chmod -R a+rX /opt/hermes
+RUN chmod -R a+rX /opt/uv-python
 
 # Hermes WebUI: pure Python (stdlib + pyyaml) + vanilla JS, served from /opt/hermes-webui
 WORKDIR /opt/hermes-webui
