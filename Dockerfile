@@ -52,7 +52,17 @@ RUN npm install --prefer-offline --no-audit && \
   npx playwright install --with-deps chromium --only-shell && \
   npm cache clean --force
 
-RUN uv venv && \
+# Pin the venv interpreter to 3.13 explicitly. Without `--python`, `uv venv`
+# selects the NEWEST version allowed by the project's `requires-python`
+# (">=3.11,<3.15") and — with UV_PYTHON_INSTALL_DIR set — fetches a managed
+# 3.14, silently moving the image off the interpreter it is validated on.
+# That breaks startup: sitecustomize's ABI guard only strips the
+# /data/installs/... managed-dependency env when the `pythonX.Y` tag MISMATCHES
+# the running interpreter, so on 3.14 the guard no-ops and that env's
+# site-packages (which has NO PyYAML) stays active — then `admin/proxy.py`
+# does `import yaml` and the app dies before it can listen (healthcheck
+# "service unavailable"). Keep this in lockstep with the guard's assumption.
+RUN uv venv --python 3.13 && \
   uv pip install --no-cache-dir -e ".[all,messaging]"
 
 # snowballstemmer is imported UNCONDITIONALLY by tools/tool_search_catalog.py
