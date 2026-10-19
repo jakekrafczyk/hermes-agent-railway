@@ -4,16 +4,25 @@ Monkey-patches ``tools.tirith_security`` so lookalike-TLD ``warn`` findings for
 known-good production gTLDs (``.app`` AND ``.run``) are suppressed, instead of
 only ``.app``.
 
-WHY THIS EXISTS (upgrade-proof):
+WHY THIS EXISTS:
 The baked module at ``/opt/hermes/tools/tirith_security.py`` ships with
 ``_is_app_tld_finding`` hard-coded to suppress ``.app`` only. FAL inference
 endpoints (``queue.fal.run``) hit the ``.run`` TLD, which the heuristic flags
 as 'Lookalike TLD — can be confused with file extensions', forcing a manual
 approval prompt on every image-gen call even under ``approvals.mode: auto``.
 A direct edit of the baked file works but is lost on the next hermes upgrade.
-This file lives on the persistent ``/opt/hermes-railway/`` volume (first on
-PYTHONPATH) and re-applies the fix at every interpreter startup, so it
-survives redeploys/upgrades that revert the baked module.
+
+CURRENTLY INERT: the pinned agent revision no longer ships
+``tools/tirith_security`` at all (upstream removed the command-security layer),
+so this patch no-ops through its ImportError guard. It is kept correct for the
+revision that restores the module.
+
+WHERE THIS FILE LIVES: it is baked into the image from the repo
+(``overlay/sitecustomize.py`` → ``/opt/hermes-railway/sitecustomize.py``) and is
+auto-imported because ``/opt/hermes-railway`` is first on ``PYTHONPATH``. NOTE
+``/opt`` is the container's writable overlay, NOT a volume (the volume is
+``/data``): a copy dropped there at runtime is wiped on every redeploy, which is
+exactly why this file lives in the repo.
 
 The patch is idempotent, reversible (remove this file to restore stock
 behavior), and uses lazy import so it is cheap in short-lived processes.
@@ -24,28 +33,61 @@ from __future__ import annotations
 import re
 import sys
 
-# A lookalike-TLD finding is only benign for the *exact* gTLDs ``.app`` and
-# ``.run``. Match on a real label boundary so ``.apple`` / ``.application`` /
-# ``.running`` are NOT suppressed — a plain substring test over-matched them.
-_TLD_RE = re.compile(r"\.(app|run)(?![a-z0-9-])")
+# A lookalike-TLD finding is benign only when the flagged *host* genuinely ends
+# in the ``.app`` / ``.run`` gTLD. Matching the raw finding text was wrong twice
+# over: a substring test also matched ``.apple``/``.application``, and even a
+# label-boundary lookahead still matched ``.app`` used as an INNER label
+# (``paypal.app.evil.example``) — i.e. the exact spoofing shape the heuristic
+# exists to catch. So resolve a hostname and require the host to end in the gTLD.
+_BENIGN_TLDS = frozenset({"app", "run"})
+_BENIGN_SUFFIXES = (".app", ".run")
+# A dotted hostname token inside URL-ish text (used when there is no scheme).
+_HOST_TOKEN_RE = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+")
+# Fields that carry a host/URL. Deliberately excludes free-text ``detail`` /
+# ``description`` / ``message``: suppressing a security finding because prose
+# merely mentions a ``.app`` host is the over-match this patch removes. If a
+# finding ever exposes only prose, it fails safe (warns).
+_HOST_FIELDS = ("host", "hostname", "domain", "value", "url")
+
+
+def _hosts_in(value) -> list[str]:
+    """Candidate hostnames in a URL / bare-host string (empty for free text)."""
+    if not isinstance(value, str):
+        return []
+    s = value.strip()
+    if not s or len(s) > 4096:
+        return []
+    low = s.lower()
+    hosts: list[str] = []
+    if "://" in low:
+        from urllib.parse import urlsplit
+        try:
+            h = urlsplit(low).hostname
+        except ValueError:
+            h = None
+        if h:
+            hosts.append(h.rstrip("."))
+    hosts.extend(m.rstrip(".") for m in _HOST_TOKEN_RE.findall(low))
+    return [h for h in hosts if "." in h]
 
 
 def _patched_benign_tld(finding) -> bool:
     """True if a lookalike_tld finding targets a known-good prod TLD (.app/.run).
 
-    Mirrors the stock ``_is_app_tld_finding`` but also suppresses ``.run``,
-    which is a legitimate gTLD used by production API endpoints (e.g.
-    queue.fal.run). Any other TLD or rule still warns.
+    Mirrors the stock ``_is_app_tld_finding`` but also suppresses ``.run``, which
+    is a legitimate gTLD used by production API endpoints (e.g. queue.fal.run).
+    Suppression requires the finding's *host* to END in the gTLD, so an inner
+    ``.app``/``.run`` label still warns. Any other rule or TLD still warns.
     """
     if not isinstance(finding, dict):
         return False
     if finding.get("rule_id") != "lookalike_tld":
         return False
-    for field in ("value", "tld", "detail", "description", "message"):
-        val = finding.get(field)
-        if val is None:
-            continue
-        if _TLD_RE.search(str(val).lower()):
+    tld = finding.get("tld")
+    if isinstance(tld, str) and tld.strip().lower().lstrip(".") in _BENIGN_TLDS:
+        return True
+    for field in _HOST_FIELDS:
+        if any(h.endswith(_BENIGN_SUFFIXES) for h in _hosts_in(finding.get(field))):
             return True
     return False
 
@@ -428,8 +470,8 @@ _patch_buzz_ws_wedge()  # RE-ENABLED 2026-09-11 00:55 after fixing MethodType ar
 # repair the binding. With auxiliary_client complete (and conversation_compression
 # cached) before any thread exists, the lazy first-compress import becomes a
 # no-op and can never race. Idempotent, reversible (delete this block to restore
-# stock behavior), and upgrade-proof (re-applied every interpreter start from the
-# persistent /opt/hermes-railway volume).
+# stock behavior) and re-applied at every interpreter start — this file is baked
+# into the image from the repo.
 # =============================================================================
 
 
@@ -765,9 +807,9 @@ _install_async_delegation_profile_aware()
 # whole-message signature, so legitimate repeated headings/sections or distinct
 # consecutive answers are never collapsed.
 #
-# Idempotent, reversible (delete this block to restore stock behavior), and
-# upgrade-proof (the baked run_agent.py reverts on upgrade; this persistent
-# /opt/hermes-railway volume re-applies it at every interpreter start).
+# Idempotent, reversible (delete this block to restore stock behavior) and
+# re-applied at every interpreter start (the baked run_agent.py reverts on
+# upgrade; this file is baked into the image from the repo).
 # =============================================================================
 import re as _re
 import difflib as _difflib
@@ -914,10 +956,11 @@ _install_doubled_content_collapse()
 #
 # Fix: register a meta-path finder that, whenever `api.config` is imported in
 # the WebUI process, extends `_FALLBACK_MODELS` (in place) with any additional
-# OpenRouter models listed here. Runs at every interpreter start via this
-# persistent /opt/hermes-railway sitecustomize.py, so it survives WebUI
-# upgrades that revert the baked config.py. The finder is idempotent (dedupes
-# by model id) and only fires for the WebUI's own `api.config` module — every
+# OpenRouter models listed here. Runs at every interpreter start via
+# sitecustomize.py (baked into the image at /opt/hermes-railway, first on
+# PYTHONPATH), so it survives updates that revert the baked config.py. The
+# finder is idempotent (dedupes by model id) and only fires for the WebUI's own
+# `api.config` module — every
 # other import is passed through untouched.
 #
 # To add another model to the WebUI dropdown, append a
@@ -1029,10 +1072,10 @@ _install_webui_model_dropdown_extension()
 # executing, aliases the moved helpers back onto it — only when the attribute is
 # genuinely missing (never clobbering a real one). The sibling module is
 # imported AFTER kanban_db has executed, so there is no import cycle
-# (`kanban_db_connect` does not import `kanban_db`). This layer lives in the
-# persistent /opt/hermes-railway sitecustomize.py (on PYTHONPATH at boot), so it
-# survives both Agent and WebUI upgrades — the durable counterpart to the
-# WebUI's baked shim.
+# (`kanban_db_connect` does not import `kanban_db`). This layer lives in
+# sitecustomize.py, baked into the image at /opt/hermes-railway (first on
+# PYTHONPATH at boot), so it survives Agent and WebUI updates — the durable
+# counterpart to the WebUI's baked shim.
 # =============================================================================
 
 _KANBAN_COMPAT_ALIASES = (
