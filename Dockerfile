@@ -74,7 +74,9 @@ RUN uv venv --python 3.13 && \
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir "snowballstemmer==3.1.1"
 
 RUN chmod -R a+rX /opt/hermes
-RUN chmod -R a+rX /opt/uv-python
+# /opt/uv-python only exists when uv downloads a managed Python; skip the chmod
+# when the base image's interpreter is used instead.
+RUN if [ -d /opt/uv-python ]; then chmod -R a+rX /opt/uv-python; fi
 
 # Hermes WebUI: pure Python (stdlib + pyyaml) + vanilla JS, served from /opt/hermes-webui
 WORKDIR /opt/hermes-webui
