@@ -55,6 +55,14 @@ RUN npm install --prefer-offline --no-audit && \
 RUN uv venv && \
   uv pip install --no-cache-dir -e ".[all,messaging]"
 
+# snowballstemmer is imported UNCONDITIONALLY by tools/tool_search_catalog.py
+# (the tool-search BM25 stemmer), but upstream gates the dependency behind
+# `python_version >= '3.14'` while this image runs Python 3.13 — so `.[all]`
+# silently skips it and any process importing the tool-search catalog dies with
+# "No module named 'snowballstemmer'". Install explicitly, matching upstream's
+# pin. Drop this line once the image moves to 3.14.
+RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir "snowballstemmer==3.1.1"
+
 RUN chmod -R a+rX /opt/hermes
 RUN chmod -R a+rX /opt/uv-python
 
@@ -84,6 +92,11 @@ COPY skills ./skills
 COPY profiles ./profiles
 COPY plugins ./plugins
 COPY entrypoint.sh ./entrypoint.sh
+
+# Runtime patch layer. Baked into the image (not left to the container's writable
+# overlay, which is wiped on every redeploy) so it survives deploys. It is
+# auto-imported because /opt/hermes-railway is first on PYTHONPATH.
+COPY overlay/sitecustomize.py /opt/hermes-railway/sitecustomize.py
 
 # Owned by `hermes` so `git fetch`/`hermes update` from the Web TUI do not trip
 # "detected dubious ownership" (repos owned by root, commands run as hermes).
