@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie
 
-ARG HERMES_REF=71d34bad1045610252eda02ee79549436896e784
+ARG HERMES_REF=v2026.9.24
 ARG HERMES_WEBUI_REF=v0.50.278
 
 ENV PYTHONUNBUFFERED=1 \
@@ -52,26 +52,19 @@ RUN npm install --prefer-offline --no-audit && \
   npx playwright install --with-deps chromium --only-shell && \
   npm cache clean --force
 
-# Pin the venv interpreter to 3.13 explicitly. Without `--python`, `uv venv`
-# selects the NEWEST version allowed by the project's `requires-python`
-# (">=3.11,<3.15") and — with UV_PYTHON_INSTALL_DIR set — fetches a managed
-# 3.14, silently moving the image off the interpreter it is validated on.
-# That breaks startup: sitecustomize's ABI guard only strips the
-# /data/installs/... managed-dependency env when the `pythonX.Y` tag MISMATCHES
-# the running interpreter, so on 3.14 the guard no-ops and that env's
-# site-packages (which has NO PyYAML) stays active — then `admin/proxy.py`
-# does `import yaml` and the app dies before it can listen (healthcheck
-# "service unavailable"). Keep this in lockstep with the guard's assumption.
-RUN uv venv --python 3.13 && \
+# Build the venv on Python 3.14. Upstream now supports ONLY 3.14, so every core
+# dependency is gated `; python_version >= '3.14'`; on a 3.13 venv NONE of them
+# install (`uv pip compile --python-version 3.13` resolves to zero packages),
+# silently dropping openai, ruamel.yaml, jinja2, rich and ~30 more. 3.14 is also
+# the interpreter Hermes's own PM builds its managed-dependency env with, so the
+# runtime deps agree. The sitecustomize ABI guard is hardened in lockstep: it
+# now keeps THIS venv's site-packages on sys.path even when the managed env's
+# tag matches, so the /data env (which has no PyYAML) can no longer shadow
+# `import yaml` at startup. The explicit snowballstemmer install that used to
+# follow this line is gone — on 3.14 it arrives via the gated dependency set
+# like every other core package.
+RUN uv venv --python 3.14 && \
   uv pip install --no-cache-dir -e ".[all,messaging]"
-
-# snowballstemmer is imported UNCONDITIONALLY by tools/tool_search_catalog.py
-# (the tool-search BM25 stemmer), but upstream gates the dependency behind
-# `python_version >= '3.14'` while this image runs Python 3.13 — so `.[all]`
-# silently skips it and any process importing the tool-search catalog dies with
-# "No module named 'snowballstemmer'". Install explicitly, matching upstream's
-# pin. Drop this line once the image moves to 3.14.
-RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir "snowballstemmer==3.1.1"
 
 RUN chmod -R a+rX /opt/hermes
 # /opt/uv-python only exists when uv downloads a managed Python; skip the chmod

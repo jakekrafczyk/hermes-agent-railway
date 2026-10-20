@@ -1195,13 +1195,23 @@ _install_kanban_module_split_compat()
 # does not match THIS interpreter and restore this interpreter's OWN
 # site-packages. This is exactly the state that worked before the mismatched env
 # was committed — purely additive/restorative. Delete this block to revert.
+#
+# 2026-10-19 (hardening): also cover the MATCHING-tag case. When the managed
+# env's tag equals the running interpreter's (e.g. image and PM env both 3.14)
+# the old `if not foreign: return` skipped the restore, so this venv's
+# site-packages dropped off sys.path — PyYAML (present here, ABSENT from the
+# managed env) vanished and `admin/proxy.py`'s `import yaml` killed startup.
+# The own-site-packages restore now runs unconditionally; see
+# overlay/test_abi_guard.py.
 # =============================================================================
 
 _RE_FOREIGN_SITE_PACKAGES = None
 
 
 def _deactivate_foreign_dependency_env() -> None:
-    """Undo an ABI-incompatible managed-dependency activation on sys.path."""
+    """Undo an ABI-incompatible managed-dependency activation on sys.path, and
+    always keep THIS interpreter's own site-packages reachable — a matching-tag
+    managed env otherwise leaves it off sys.path entirely."""
     global _RE_FOREIGN_SITE_PACKAGES
     try:
         import re as _re_abi
@@ -1223,8 +1233,6 @@ def _deactivate_foreign_dependency_env() -> None:
         _match = _RE_FOREIGN_SITE_PACKAGES.search(str(_entry))
         if _match and _match.group(1) != _current:
             foreign.append(_entry)
-    if not foreign:
-        return
 
     for _entry in foreign:
         try:
@@ -1232,13 +1240,24 @@ def _deactivate_foreign_dependency_env() -> None:
         except ValueError:
             pass
 
+    # Ensure THIS interpreter's own site-packages is on sys.path even when no
+    # foreign-tagged env was found. `activate_dependencies()` REPLACES every
+    # site-packages entry on sys.path, so when the managed env's tag MATCHES
+    # (image and env both 3.14) the old `if not foreign: return` left this
+    # venv's packages off sys.path entirely — including PyYAML, which
+    # admin/proxy.py imports at startup, crashing the app before it can listen.
+    # Prepend (position 0), as the foreign-tag path already did, so this venv's
+    # validated ABI-correct packages win; a partial managed env still supplies
+    # anything they lack.
     own = None
     try:
         own = _sysconfig_abi.get_paths().get("purelib")
     except Exception:
         own = None
+    own_added = False
     if own and _os_abi.path.isdir(own) and own not in sys.path:
         sys.path.insert(0, own)
+        own_added = True
 
     # `activate_dependencies()` also rewrites os.environ["PYTHONPATH"] to
     # "<project_root>:<selected>" (pm/environments.py), DROPPING the durable patch
@@ -1257,11 +1276,19 @@ def _deactivate_foreign_dependency_env() -> None:
 
     try:
         import logging as _lg_abi
-        _lg_abi.getLogger("sitecustomize").warning(
-            "[hermes-sitecustomize] ignored ABI-incompatible dependency env %s "
-            "(this interpreter=%s); restored own site-packages %s",
-            foreign, _current, own,
-        )
+        _logger_abi = _lg_abi.getLogger("sitecustomize")
+        if foreign:
+            _logger_abi.warning(
+                "[hermes-sitecustomize] ignored ABI-incompatible dependency env %s "
+                "(this interpreter=%s); restored own site-packages %s",
+                foreign, _current, own,
+            )
+        elif own_added:
+            _logger_abi.info(
+                "[hermes-sitecustomize] re-added own site-packages %s to sys.path "
+                "(managed-dependency activation had replaced it; this interpreter=%s)",
+                own, _current,
+            )
     except Exception:
         pass
 
