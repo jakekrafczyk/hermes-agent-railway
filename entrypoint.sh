@@ -252,12 +252,16 @@ if [ -d "/opt/hermes-railway/profiles" ]; then
     [ -d "${profile_dir}" ] || continue
     profile_name="$(basename "${profile_dir}")"
     [ "${profile_name}" = ".gitignore" ] && continue
+    # `cp -Ru` (update): never overwrite a live file that is newer than the shipped
+    # copy. /data/profiles/<name>/{SOUL,AGENTS}.md are edited in place by profile
+    # sessions and are PRIVATE (not committed) — the repo copy is only a seed for a
+    # fresh volume. Plain `cp -R` silently reverted months of doctrine on every boot.
     if [ "${profile_name}" = "default" ]; then
-      cp -R "${profile_dir}"/* "${HERMES_HOME}/"
+      cp -Ru "${profile_dir}"/* "${HERMES_HOME}/"
       echo "Synced profile: default (→ HERMES_HOME)"
     else
       mkdir -p "${HERMES_HOME}/profiles/${profile_name}"
-      cp -R "${profile_dir}"/* "${HERMES_HOME}/profiles/${profile_name}/"
+      cp -Ru "${profile_dir}"/* "${HERMES_HOME}/profiles/${profile_name}/"
       echo "Synced profile: ${profile_name}"
     fi
   done
