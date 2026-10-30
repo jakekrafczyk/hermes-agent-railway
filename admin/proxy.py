@@ -191,14 +191,47 @@ def _filter_response_headers(headers) -> list[tuple[str, str]]:
     return [(k, v) for k, v in headers.items() if k.lower() not in DROPPED_RESPONSE_HEADERS]
 
 
+class _TransparentCookieJar(httpx.Cookies):
+    """Cookie jar that never stores or replays cookies.
+
+    SECURITY (auth-bypass fix): the upstream client is SHARED by every
+    visitor, so any ``Set-Cookie`` it retained — e.g. ``hermes_session`` from a
+    ``/api/auth/login`` response — would be attached to every later request
+    that arrives without its own ``Cookie`` header, silently authenticating
+    anonymous visitors as the last person who logged in and defeating the
+    WebUI password entirely. Being cookie-TRANSPARENT is the only correct
+    behaviour for this proxy: cookie state must come solely from the inbound
+    request headers we forward.
+    """
+
+    def extract_cookies(self, response) -> None:  # type: ignore[override]
+        return None
+
+    def set_cookie_header(self, request) -> None:  # type: ignore[override]
+        return None
+
+
 async def _ensure_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(
+        client = httpx.AsyncClient(
             base_url=WEBUI_BASE_URL,
             timeout=httpx.Timeout(connect=5.0, read=None, write=None, pool=5.0),
             follow_redirects=False,
         )
+        # SECURITY: force a cookie-TRANSPARENT upstream client. The client is
+        # shared by every visitor, so a Set-Cookie it retained (e.g.
+        # ``hermes_session`` from /api/auth/login) would be replayed to later
+        # requests that carry no Cookie of their own — authenticating anonymous
+        # visitors as the last person who logged in. ``_cookies`` is written
+        # directly because the public ``cookies`` setter re-wraps its argument
+        # in a plain Cookies(), discarding these overrides (httpx 0.28).
+        try:
+            setattr(client, "_cookies", _TransparentCookieJar())
+        except Exception:  # pragma: no cover - defensive across httpx versions
+            setattr(client.cookies, "extract_cookies", lambda response: None)
+            setattr(client.cookies, "set_cookie_header", lambda request: None)
+        _client = client
     return _client
 
 

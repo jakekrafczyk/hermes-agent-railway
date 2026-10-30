@@ -1447,3 +1447,33 @@ def _install_foreign_dependency_env_guard() -> None:
 
 
 _install_foreign_dependency_env_guard()
+
+
+# ── Incident-response: WebUI password override (2026-10-22) ──────────────────
+# The Railway environment-variable store was breached, so ADMIN_PASSWORD /
+# HERMES_WEBUI_PASSWORD must be treated as compromised. api.auth.get_password_hash()
+# prefers the HERMES_WEBUI_PASSWORD env var (which entrypoint.sh derives from the
+# Railway ADMIN_PASSWORD service variable), so the WebUI password can normally only
+# be changed by a Railway redeploy/rebuild. This hook lets it be rotated from the
+# persistent volume instead: write the new value to _PASSWORD_OVERRIDE_FILE and the
+# next process start picks it up — no rebuild required. Delete the file to fall
+# back to the Railway-provided value. Inert (and cheap) when the file is absent.
+_PASSWORD_OVERRIDE_FILE = "/data/.hermes/webui/.password_override"
+
+
+def _apply_password_override() -> None:
+    try:
+        import os
+        if not os.path.exists(_PASSWORD_OVERRIDE_FILE):
+            return
+        with open(_PASSWORD_OVERRIDE_FILE, "r", encoding="utf-8") as _fh:
+            _pw = _fh.read().strip()
+        if not _pw:
+            return
+        os.environ["HERMES_WEBUI_PASSWORD"] = _pw
+        os.environ["ADMIN_PASSWORD"] = _pw
+    except Exception:
+        pass
+
+
+_apply_password_override()
