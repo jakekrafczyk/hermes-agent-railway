@@ -326,6 +326,25 @@ export HERMES_WEBUI_STATE_DIR="${HERMES_HOME}/.hermes/webui"
 # Point hermes-webui at our Hermes Agent install so agent features work
 export HERMES_WEBUI_AGENT_DIR="/opt/hermes"
 
+# Optional native SSO (OIDC) for hermes-webui — e.g. a "Sign in with Google"
+# button on /login. Values live on the PERSISTENT volume, never in git: an OIDC
+# client secret committed here would be a leak. When the file is present it
+# supplies HERMES_WEBUI_OIDC_{ISSUER,CLIENT_ID,CLIENT_SECRET,REDIRECT_URI,
+# ALLOW_CLAIM,ALLOW_VALUES}; hermes-webui reads those env vars with priority over
+# config.yaml. Absent = OIDC stays disabled and /login stays password-only.
+#
+# NOTE: only write the file once EVERY value (client secret included) is set —
+# hermes-webui treats issuer+client_id+allow_claim+allow_values as "enabled", so
+# a partial file would show the button and then fail at the token exchange.
+OIDC_ENV_FILE="${HERMES_HOME}/.hermes/webui/oidc.env"
+if [ -f "${OIDC_ENV_FILE}" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "${OIDC_ENV_FILE}"
+  set +a
+  echo "[entrypoint] Loaded WebUI OIDC configuration from ${OIDC_ENV_FILE}"
+fi
+
 # Optional: auto-start the messaging gateway daemon (Telegram/Discord/Slack/email).
 # Default off — users typically configure channel tokens via the WebUI Settings
 # panel first, then redeploy with START_GATEWAY=true.
