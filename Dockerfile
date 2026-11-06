@@ -43,7 +43,7 @@ WORKDIR /opt/hermes
 
 RUN git init . && \
   git remote add origin https://github.com/NousResearch/hermes-agent.git && \
-  (git fetch --depth 1 origin "${HERMES_REF}" || git fetch --depth 1 origin "refs/tags/${HERMES_REF}:refs/tags/${HERMES_REF}") && \
+  (git fetch --depth 1 origin "refs/tags/${HERMES_REF}:refs/tags/${HERMES_REF}" || git fetch --depth 1 origin "${HERMES_REF}") && \
   git checkout --detach FETCH_HEAD
 
 ENV npm_config_install_links=false
