@@ -30,7 +30,7 @@ RUN apt-get update && \
     tini && \
   rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh && \
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x -o /tmp/nodesource_setup.sh && \
     bash /tmp/nodesource_setup.sh && \
     rm -f /tmp/nodesource_setup.sh && \
     apt-get install -y --no-install-recommends nodejs && \
