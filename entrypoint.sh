@@ -270,9 +270,12 @@ if [ -d "/opt/hermes-railway/skills" ]; then
   for skill_dir in /opt/hermes-railway/skills/*/; do
     [ -d "${skill_dir}" ] || continue
     skill_name="$(basename "${skill_dir}")"
-    rm -rf "${HERMES_HOME}/skills/${skill_name}"
-    cp -R "${skill_dir}" "${HERMES_HOME}/skills/${skill_name}"
-    echo "Synced Railway skill: ${skill_name}"
+    mkdir -p "${HERMES_HOME}/skills/${skill_name}"
+    # Non-destructive merge: update shipped skills only when the shipped copy is
+    # newer. Never delete operator-authored skills living in the same category
+    # directory — the old `rm -rf` here wiped them on every redeploy.
+    cp -Ru "${skill_dir}"/* "${HERMES_HOME}/skills/${skill_name}/" 2>/dev/null || true
+    echo "Synced Railway skill: ${skill_name} (merge)"
   done
 fi
 
