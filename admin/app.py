@@ -25,11 +25,12 @@ listening it can expose **`.env`** — minimize uptime on public Railway URLs un
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from . import proxy as hermes_proxy
@@ -72,12 +73,42 @@ async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
+CLEANKORE_WA_UPSTREAM = os.environ.get("CLEANKORE_WA_UPSTREAM", "http://127.0.0.1:8090")
+
+
+async def cleankore_wa_webhook(request: Request):
+    """Reverse-proxy Meta's WhatsApp webhook to the CleanKore agent app.
+
+    Served on this same public port; the downstream app verifies Meta's
+    X-Hub-Signature-256 HMAC so only genuine Meta requests are processed.
+    """
+    import httpx
+
+    url = CLEANKORE_WA_UPSTREAM.rstrip("/") + "/webhook/whatsapp"
+    if request.url.query:
+        url = f"{url}?{request.url.query}"
+    body = await request.body()
+    fwd = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            upstream = await client.request(request.method, url, headers=fwd, content=body)
+    except httpx.ConnectError:
+        return Response("CleanKore WhatsApp app unavailable", status_code=502)
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers={"content-type": upstream.headers.get("content-type", "text/plain")},
+    )
+
+
 routes = [
     Route("/tui", tui_page, methods=["GET"]),
     Route("/health", health, methods=["GET"]),
     WebSocketRoute("/tui/ws/auth/{provider}", hermes_terminal.login_ws),
     WebSocketRoute("/tui/ws/shell", hermes_terminal.shell_ws),
     Mount(DASHBOARD_MOUNT_PREFIX, build_dashboard_starlette_app()),
+    # CleanKore WhatsApp webhook (must precede the catch-all proxy).
+    Route("/webhook/whatsapp", cleankore_wa_webhook, methods=["GET", "POST"]),
     # Catch-all proxy for everything else (HTTP + WebSocket).
     WebSocketRoute("/{path:path}", hermes_proxy.ws_proxy),
     Route("/{path:path}", hermes_proxy.http_proxy, methods=hermes_proxy.PROXY_METHODS),

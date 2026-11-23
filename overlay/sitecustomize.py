@@ -1477,3 +1477,41 @@ def _apply_password_override() -> None:
 
 
 _apply_password_override()
+
+
+# =============================================================================
+# CLEANKORE WHATSAPP AGENT SUPERVISOR SPAWN (2026-11-23)
+# =============================================================================
+# Boots the CleanKore WhatsApp task agent (webhook server on loopback :8090 +
+# the weekly scheduler) in-container. Spawned from the public-port admin
+# process so it always starts at boot. Idempotent — the supervisor holds a
+# flock — and a no-op for every other Python process.
+# =============================================================================
+
+def _spawn_cleankore_wa_supervisor() -> None:
+    import os
+    import subprocess
+
+    argv = getattr(sys, "argv", []) or []
+    if not any("admin.app" in a for a in argv):
+        return
+    script = "/data/scripts/cleankore-wa-supervisor.sh"
+    if not os.path.exists(script):
+        return
+    try:
+        subprocess.Popen(
+            [script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        print("[hermes-sitecustomize] cleankore-wa supervisor spawned")
+    except Exception as exc:  # a spawn failure must never affect startup
+        print("[hermes-sitecustomize] cleankore-wa supervisor spawn failed:", repr(exc))
+
+
+try:
+    _spawn_cleankore_wa_supervisor()
+except Exception:
+    pass
