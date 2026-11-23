@@ -378,6 +378,165 @@ def _buzz_cap_send(adapter):
     return adapter
 
 
+# =============================================================================
+# BUZZ REPLY-AUTHOR PERSISTENCE (2026-11-09)
+# =============================================================================
+# Symptom: "I replied to the agent's message (no @mention) and got silence" —
+# intermittently, and it self-heals on an explicit @mention. Darryl's case and
+# the general one are the same bug.
+#
+# Root cause: the mention gate in adapter._handle_event drops a group message
+# unless it is text/p-tag addressed to us OR `reply_to_is_own`. The latter needs
+# the reply PARENT in `event_meta` (in-memory id -> (author, snippet)).
+# `buzz_cursors.py::_cursor_payload` persists ONLY {chat_type,last_ts,seen}, and
+# `_seed_channel` returns EARLY when a cursor is restorable, so after a gateway
+# restart `event_meta` is EMPTY. Because the poll fetches `--since last_ts`, bot
+# messages older than the newest event are never re-read into it either. So a
+# NO-@mention reply to a bot message posted BEFORE the restart fails the gate and
+# is dropped with only a logger.debug — no INFO trace, no user feedback.
+#
+# Verified 2026-11-09 by executing the adapter class methods directly (state with
+# the parent cached -> DISPATCH; cursor restored -> event_meta empty, dropped),
+# and on a real incident: cleankore 2026-11-09 01:23, reply 8adc706f... to message
+# 9a334b5b... sent 29h earlier was dropped for darryls_strategic_advisor (its id
+# IS present in that profile's own channel-cursors.json `seen`, proving the
+# adapter fetched it); the same user re-asked WITH explicit @mentions 8 min later
+# and both agents answered.
+#
+# Fix: persist, per channel, the ids of messages WE authored (bounded), and
+# restore them into `event_meta` on cursor restore. Only the AUTHOR matters for
+# the ownership test, so ids are stored without snippets to keep the cursor file
+# small. Instance-scoped via create_adapter because the adapter module is imported
+# under a runtime alias (hermes_plugins.platforms__buzz__home_<hash>.adapter), so
+# module-global patching is unreliable — the same reason the WS-wedge patch wraps
+# create_adapter. Additive and reversible: a non-Buzz adapter (no cursor API)
+# falls straight through the try/except guard.
+# =============================================================================
+
+_BUZZ_OWN_IDS_CAP = 100  # own-message ids retained per channel (>= any realistic thread reply)
+_BUZZ_REPLY_AUTHORS_LOGGED: list = []
+
+
+def _buzz_persist_reply_authors(adapter):
+    """Make reply-to-our-own-message recognition survive a gateway restart.
+
+    Wraps four BuzzCursorMixin/adapter methods on the INSTANCE (plain functions
+    stored as instance attributes, so Python calls them with exactly the args
+    given — no bound-``self`` shift; see the _buzz_cap_send note). Non-Buzz
+    adapters lack the cursor API and are returned untouched.
+    """
+    if adapter is None or getattr(adapter, "_buzz_reply_authors_applied", False):
+        return adapter
+    try:
+        from collections import OrderedDict
+        original_payload = adapter._cursor_payload
+        original_load = adapter._load_cursors
+        original_restore = adapter._restore_channel_state
+        original_mark = adapter._cursor_mark
+    except Exception:
+        return adapter  # not a Buzz adapter (or API drift) — leave it alone
+
+    def _own_ids(state):
+        """Ids of messages authored by THIS identity, newest last (bounded)."""
+        meta = (state or {}).get("event_meta") or {}
+        self_pk = str(getattr(adapter, "_self_pubkey", "") or "").lower()
+        if not self_pk:
+            return []
+        out = []
+        for eid, entry in meta.items():
+            try:
+                author = str(entry[0] or "").lower()
+            except Exception:
+                author = ""
+            if author == self_pk:
+                out.append(str(eid))
+        return out[-_BUZZ_OWN_IDS_CAP:]
+
+    def _cursor_payload():
+        payload = original_payload()
+        try:
+            own = {}
+            for cid, state in (getattr(adapter, "_channel_state", None) or {}).items():
+                ids = _own_ids(state)
+                if ids:
+                    own[str(cid)] = ids
+            if own and isinstance(payload, dict):
+                payload["own_messages"] = own
+        except Exception:
+            pass
+        return payload
+
+    def _load_cursors():
+        original_load()
+        try:
+            path = adapter._cursor_path()
+            if not path.exists():
+                return
+            import json as _json
+            data = _json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                return
+            # Mirror the stock identity/relay guard so a foreign file is ignored.
+            if data.get("identity") != getattr(adapter, "_self_pubkey", None):
+                return
+            if data.get("relay") != getattr(adapter, "relay_url", None):
+                return
+            own = data.get("own_messages")
+            if not isinstance(own, dict):
+                return
+            for cid, ids in own.items():
+                pending = (getattr(adapter, "_restored_cursors", None) or {}).get(str(cid))
+                if pending is None or not isinstance(ids, list):
+                    continue
+                pending["own_messages"] = [str(i) for i in ids][-_BUZZ_OWN_IDS_CAP:]
+        except Exception:
+            pass
+
+    def _restore_channel_state(channel_id, chat_type):
+        # Read the pending payload BEFORE the stock call pops it.
+        pending = (getattr(adapter, "_restored_cursors", None) or {}).get(channel_id) or {}
+        own_ids = pending.get("own_messages") or []
+        restored = original_restore(channel_id, chat_type)
+        if restored and own_ids:
+            try:
+                state = adapter._channel_state.get(channel_id)
+                if state is not None:
+                    meta = state.setdefault("event_meta", OrderedDict())
+                    self_pk = getattr(adapter, "_self_pubkey", "") or ""
+                    for mid in own_ids:
+                        meta.setdefault(str(mid), (self_pk, ""))
+            except Exception:
+                pass
+        return restored
+
+    def _cursor_mark(state):
+        # Include own-id count so a just-sent message is persisted promptly.
+        return tuple(original_mark(state)) + (len(_own_ids(state)),)
+
+    adapter._cursor_payload = _cursor_payload
+    adapter._load_cursors = _load_cursors
+    adapter._restore_channel_state = _restore_channel_state
+    adapter._cursor_mark = _cursor_mark
+    adapter._buzz_reply_authors_applied = True
+
+    if not _BUZZ_REPLY_AUTHORS_LOGGED:
+        _BUZZ_REPLY_AUTHORS_LOGGED.append(1)
+        # print(), NOT logging: sitecustomize's logger is unconfigured at adapter
+        # creation time, so logging.info never surfaces in gateway.log (verified —
+        # the async-delegation marker elsewhere in this file is equally invisible).
+        # Every other marker here uses print for that reason.
+        try:
+            print(
+                "[hermes-sitecustomize] buzz reply-author persistence applied "
+                "(cap=%d own ids/channel)" % _BUZZ_OWN_IDS_CAP,
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+    return adapter
+
+
 def _patch_buzz_ws_wedge() -> None:
     """Wrap platform_registry.create_adapter so opted-in profiles get the
     instance-scoped webcast wedge patch."""
@@ -410,6 +569,9 @@ def _patch_buzz_ws_wedge() -> None:
         if str(name).lower().startswith("buzz"):
             adapter.splits_long_messages = True
             adapter = _buzz_cap_send(adapter)
+        # Persist our own message ids per channel so a NO-@mention reply to one of
+        # our messages still counts as addressed after a gateway restart.
+        adapter = _buzz_persist_reply_authors(adapter)
         # Only buzz adapters with the opt-in marker are touched.
         try:
             extra = getattr(config, "extra", None) or {}
@@ -418,6 +580,7 @@ def _patch_buzz_ws_wedge() -> None:
                 adapter = _make_buzz_ws_patched_instance(adapter, float(to))
                 print(
                     _BUZZ_WS_TEST_MARKER % (str(name), float(to)),
+                    file=sys.stderr,
                     flush=True,
                 )
         except Exception as e:
@@ -516,6 +679,23 @@ def _repair_auxiliary_client() -> bool:
         return False
 
 
+def _is_managed_worker() -> bool:
+    """True when this interpreter is the gateway's managed-worker bootstrap.
+
+    That bootstrap binds a frozen safe-worker policy BEFORE any runtime import
+    (agent/safe_worker_policy.py: "worker policy must bind before runtime imports").
+    The eager compression preload below imports ``agent.conversation_compression``,
+    which transitively pulls a runtime module and makes that bind raise — killing
+    EVERY managed/Kanban worker before it can say hello. Skip the preload here; the
+    worker imports what it needs after binding. (2026-11-19: this broke all kanban
+    card dispatch with 'managed_worker_failed'.)"""
+    try:
+        argv = getattr(sys, "orig_argv", None) or sys.argv
+        return "agent.managed_worker" in argv
+    except Exception:
+        return False
+
+
 def _preload_compression_modules() -> None:
     """Force auxiliary_client + conversation_compression to load synchronously
     at boot. Order matters: auxiliary_client MUST be complete before
@@ -541,6 +721,7 @@ def _preload_compression_modules() -> None:
                 "agent.auxiliary_client" in sys.modules,
                 "agent.conversation_compression" in sys.modules,
             ),
+            file=sys.stderr,
             flush=True,
         )
     except Exception:
@@ -617,7 +798,40 @@ def _spawn_gateway_supervisor() -> None:
 _spawn_gateway_supervisor()
 
 
-_preload_compression_modules()
+def _spawn_intake_api_supervisor() -> None:
+    """When the gateway boots, also launch the detached intake-API supervisor so the
+    private extraction API (the one-link intake app's /api backend) survives crashes and
+    container restarts. Same guard as the gateway supervisor: only the real gateway
+    runner spawns it; idempotent via the supervisor's own lockfile; a no-op otherwise."""
+    import os
+    import subprocess
+
+    argv = getattr(sys, "argv", []) or []
+    if len(argv) < 2:
+        return
+    gw = [a for a in argv[1:] if a not in ("--replace", "--no-tui", "--skip-deps")]
+    if "gateway" not in gw or "run" not in gw:
+        return
+    script = "/data/scripts/intake-api-supervisor.sh"
+    if not os.path.exists(script):
+        return
+    try:
+        subprocess.Popen(
+            ["/bin/bash", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
+_spawn_intake_api_supervisor()
+
+
+if not _is_managed_worker():
+    _preload_compression_modules()
 
 # ---- BEGIN async-delegation cross-profile fix (2026-09-28) ----
 import os as _os_asyncfix, sys as _sys_asyncfix
@@ -940,7 +1154,8 @@ def _install_doubled_content_collapse() -> None:
     _ra.AIAgent._hermes_doubled_collapse_applied = True
 
 
-_install_doubled_content_collapse()
+if not _is_managed_worker():
+    _install_doubled_content_collapse()
 
 # =============================================================================
 # WEBUI OPENROUTER DROPDOWN MODEL EXTENSION (2026-10-10)
@@ -1500,7 +1715,7 @@ def _spawn_cleankore_wa_supervisor() -> None:
         return
     try:
         subprocess.Popen(
-            [script],
+            ["/bin/bash", script],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
